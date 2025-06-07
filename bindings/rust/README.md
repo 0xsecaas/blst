@@ -51,21 +51,74 @@ AggregateSignature
 
 A simple example for generating a key, signing a message, and verifying the message:
 ```rust
-use blst::min_pk::SecretKey;
+    use blst::min_sig::*;
+    use rand::{RngCore, rngs::OsRng};
 
-let mut rng = rand::thread_rng();
-let mut ikm = [0u8; 32];
-rng.fill_bytes(&mut ikm);
+    let msg = b"hello blst";
+    let dst = b"BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_";
 
-let sk = SecretKey::key_gen(&ikm, &[]).unwrap();
-let pk = sk.sk_to_pk();
+    let mut sigs = Vec::new();
+    let mut pks = Vec::new();
 
-let dst = b"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_";
-let msg = b"blst is such a blast";
-let sig = sk.sign(msg, dst, &[]);
+    for _ in 0..4 {
+        let mut ikm = [0u8; 32];
+        OsRng.fill_bytes(&mut ikm);
 
-let err = sig.verify(true, msg, dst, &[], &pk, true);
-assert_eq!(err, blst::BLST_ERROR::BLST_SUCCESS);
+        let sk = SecretKey::key_gen(&ikm, &[]).unwrap();
+        let pk = sk.sk_to_pk();
+        let sig = sk.sign(msg, dst, &[]);
+
+        pks.push(pk);
+        sigs.push(sig);
+    }
+
+    let sig_refs: Vec<&Signature> = sigs.iter().collect();
+    let agg_sig = AggregateSignature::aggregate(&sig_refs, false)
+        .unwrap()
+        .to_signature();
+
+    let pk_refs: Vec<&PublicKey> = pks.iter().collect();
+    let result = agg_sig.fast_aggregate_verify(true, msg, dst, &pk_refs);
+    assert_eq!(result, blst::BLST_ERROR::BLST_SUCCESS);
+```
+
+Another example demonstrating aggregation of multiple signatures over the same message:
+```rust
+use blst::min_sig::*;
+use rand::{rngs::OsRng, RngCore};
+
+let msg = b"hello blst";
+let dst = b"BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_";
+
+let mut sigs = Vec::new();
+let mut pks = Vec::new();
+
+// Generate 4 keypairs, sign the same message, and collect their signatures and public keys
+for _ in 0..4 {
+    let mut ikm = [0u8; 32];
+    OsRng.fill_bytes(&mut ikm);
+
+    // Generate a secret key from input keying material
+    let sk = SecretKey::key_gen(&ikm, &[]).expect("Failed to generate secret key");
+    let pk = sk.sk_to_pk();
+
+    // Sign the message with this key
+    let sig = sk.sign(msg, dst, &[]);
+
+    pks.push(pk);
+    sigs.push(sig);
+}
+
+// Aggregate all signatures
+let sig_refs: Vec<&Signature> = sigs.iter().collect();
+let agg_sig = AggregateSignature::aggregate(&sig_refs, false)
+    .expect("Signature aggregation failed")
+    .to_signature();
+
+let pk_refs: Vec<&PublicKey> = pks.iter().collect();
+let result = agg_sig.fast_aggregate_verify(true, msg, dst, &pk_refs);
+assert_eq!(result, blst::BLST_ERROR::BLST_SUCCESS);
+
 ```
 
 See the tests in src/lib.rs and benchmarks in benches/blst_benches.rs for further examples of usage.
